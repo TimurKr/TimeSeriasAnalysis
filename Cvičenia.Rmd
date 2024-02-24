@@ -22,14 +22,15 @@ data(airpass)
 
 ## Slovná charakterizácia
 
-Ide o časový rad s intervalom merania 1 mesiac, ktorý vyjadruje množstvo medzinárodnných pasažierov v rokoch 1949 až 1961. Hodnoty začínajú na pomerne nízkych číslach, okolo 100, ku koncu dosahujú niekoľko stoviek s jasným rastúcim trendom. Dáta očividne obsahujú sezónnu zložku, ktorej veľkosť je závislá od trendu, preto ide pravdepodobne o multiplikatívnu dekompozíciu a budeme používať adaptívny prístup.
+Ide o časový rad s intervalom merania 1 mesiac, ktorý vyjadruje množstvo medzinárodných pasažierov v rokoch 1949 až 1961. Hodnoty začínajú na pomerne nízkych číslach, okolo 100, ku koncu dosahujú niekoľko stoviek s jasným rastúcim trendom. Dáta očividne obsahujú sezónnu zložku, ktorej veľkosť je závislá od trendu, preto ide pravdepodobne o multiplikatívnu dekompozíciu a budeme používať adaptívny prístup.
 
 
-## Vykraslenie časového radu
+## Vykreslenie časového radu
 
-```{r graph}
+```{r graph, fig.width=8, fig.height=5, fig.align='center'}
 plot(airpass,type = "l", main = "Medzinárodný pasažiery leteckých spoločností", 
      xlab = "Čas", ylab = "Pasažiry (v tísícoch)")
+
 ```
 
 ## Základné údaje o časovom rade
@@ -52,9 +53,9 @@ kable(
 
 ```
 
-## Rozdelenie na trénovaciu a vyhdnocovaciu zložku
+## Rozdelenie na trénovaciu a vyhodnocovaciu zložku
 
-Rozdelme dáta na trénovaciu (prvých 9 rokov) a vyhodnocovaciu (posledné 3 roky) zložku. Použijeme balík tsibble z tydivertz na lahšiu manipuláciu. 
+Rozdelme dáta na trénovaciu (prvých 9 rokov) a vyhodnocovaciu (posledné 3 roky) zložku. Použijeme balík `tsibble` z `tydivertz` na ľahšiu manipuláciu. 
 ```{r load_2, message=FALSE}
 # Instalácia a načítanie potrebných balíkov
 library(tsibble)
@@ -62,26 +63,187 @@ library(dplyr)
 library(ggplot2)
 ```
 
-```{r splitting}
+```{r splitting, fig.width=8, fig.height=5, fig.align='center'}
+dat <- fit <- list()
 # Konverzia na tsibble
-airpass_tsibble <- as_tsibble(airpass)
+dat$full$observed <- ts(airpass)
 
-# Rodelenie urobíme po 9 rokoch
-split_point <- 9*12
+# Rozdelenie urobíme po 9 rokoch
+ratio <- 0.75
 
-train_data <- airpass_tsibble %>% 
-  head(split_point)
+dat$train <- data.frame(observed = head(dat$full$observed, ratio*length(dat$full$observed)))
+dat$valid <- data.frame(observed = tail(dat$full$observed, (1-ratio)*length(dat$full$observed)))
 
-test_data <- airpass_tsibble %>% 
-  tail(nrow(airpass_tsibble) - split_point)
+nT <- nrow(dat$train)
+nV <- nrow(dat$valid)
 
 # Vykreslenie grafu
-ggplot() +
-  geom_line(data = train_data, aes(x = index, y = value, color = "Trénovacia vzorka"), size = 1) +
-  geom_line(data = test_data, aes(x = index, y = value, color = "Testovacia vzorka"), size = 1) +
-  labs(title = "Rozdelenie časového radu na trénovaciu a testovaciu vzorku",
-       x = "Čas",
-       y = "Hodnota") +
-  scale_color_manual(values = c("Trénovacia vzorka" = "blue", "Testovacia vzorka" = "red")) +
-  theme_minimal()
+list(train = dat$train$observed,
+     valid = dat$valid$observed) |> 
+  with({
+    ggplot() + autolayer(train) + autolayer(valid) +
+      scale_color_manual(values = c(train = 1, valid = 2)) +
+      guides(color = guide_legend(title = "sample")) +
+      theme(legend.position = c(0.99, 0.01), 
+            legend.justification = c("right","bottom")) + 
+      labs(x = "year", y = "observed")
+  })
+```
+
+# Dekompozícia časového radu
+
+## Stabilizácia
+Vidíme že časový rad obsahuje veľmi jasný stúpajúci trend, ktorý sa bude dať modelovať lineárnym modelom, alebo prípadne exponenciálnym. Zároveň je úplne evidentná sezónna zložka, ktorá bude mať periódu pravdepodobne 1 rok, čiže 12 meraní. Zároveň vidíme, že amplitúda rozptylu je závislá od trendu. 
+
+Predpokladajme teda na chvíľu, že ide o exponenciálny trend, potom môžeme časový rad logaritmovať, čím dosiahneme stacionaritu a neskôr môžme skúmať trend ako lineárny.
+
+```{r log, fig.width=8, fig.height=5, fig.align='center'}
+# Logaritmová transformácia
+dat$train$log <- log(dat$train$observed)
+
+# Plotting
+autoplot(dat$train$log)
+```
+
+Vidíme, že toto účel splnilo, nakoľko máme jasný stacionárny rad s lineárnym trendom. Ďalej budeme teda analyzovať aj tento časový rad.
+
+## Odhadnutie trendu
+
+Odhadnime trend logaritmizovaného časového radu a vypočítajme jeho štatistickú významnosť.
+
+```{r trend}
+fit$Tlin <- with(data = dat$train,
+                 forecast::tslm(log ~ trend)
+                 )
+fit$Tlin |> summary() |> coef() |> round(4)
+```
+
+Vidíme že Pr hodnota je 0, teda nájdený trend je štatisticky významný. Vykreslime si ho:
+
+```{r, fig.width=8, fig.height=5, fig.align='center'}
+dat$train$Tlin <- fitted(fit$Tlin)
+
+with(dat$train,
+     forecast::autoplot(log) + 
+       forecast::autolayer(Tlin, color = 4, show.legend = FALSE) + 
+       ylab("")
+)
+```
+
+Nájdený trend popisuje vývoj tak dobre, že nemá zmysel skúšať hľadať nejaký iný model. Poďme sa teda pozrieť na sezónnu zložku.
+
+## Sezónna zložka
+
+Vykreslime si rezíduá po odpočítaní nájdeného trendu a príslušný korelogram
+
+```{r, fig.width=8, fig.height=5, fig.align='center'}
+dat$train$resT <- dat$train$log - dat$train$Tlin
+with(dat$train, {
+  forecast::autoplot(resT) |> print();
+  forecast::Acf(resT, plot = FALSE) |> 
+    forecast::autoplot(show.legend = FALSE) + ggtitle("")
+})
+```
+
+Na korelograme je jasne vidieť sezónnu zložku s periódou 12, čo zodpovedá práve faktu, že merania boli robené raz mesačne.
+
+### Indikačné funkcie
+
+Skúsme teda nájsť príslušnú sezónnu zložku pomocou indikačných funkcií.
+
+```{r, fig.width=8, fig.height=5, fig.align='center'}
+#Pridáme premennú indikujúcu mesiac
+dat$train$M <- factor(rep(1:12, length.out = length(dat$train$observed)))
+
+fit$SInd <- lm(resT ~ M, dat$train)
+
+dat$train$SInd <- fit$SInd |> fitted() |> 
+  ts() |> `tsp<-`(tsp(dat$train$HDP))
+with(dat$train, {
+  plot(resT)
+  lines(SInd, col = 12, lwd = 2)
+  plot(1:12, SInd[1:12], xaxt="n", xlab="mesiac", ylab = "Sezónna zložka", type = "b", col = 4)
+  axis(1, at = 1:12, labels = 1:12)
+})
+```
+
+Na prvom grafe vidíme modrou náš sezónny model a čiernou reziduá po odpočítaní trendu. Vidíme, pomerne vysokú mieru prekrytia. Druhý graf zobrazuje hodnoty pri indikačných funkciách. Nakoľko nejde zrovna o peknú sinusoidu, takéto riešenie sa javí vhodnejšie ako použitie goniometrických funkcií.
+
+Vykreslime si trend spolu so sezónnou zložkou v porovnaní s nameranými dátami.
+
+```{r, fig.width=8, fig.height=5, fig.align='center'}
+autoplot(dat$train$log, series="Namerané dáta") +
+  autolayer(dat$train$Tlin, series = "Lineárny trend") +
+  autolayer(dat$train$Tlin + dat$train$SInd, series = "Lineárny trend + Sezónna zložka") +
+  labs(
+    title="Porovnanie nameraných dát s lineárnym trendom a goniometrickou sezónnou zložkou",
+    y = "Logaritmus počtu pasažierov",
+    x = "Počet mesiacov o začiatku merania")
+```
+
+A keď sa pozrieme iba na jednu periódu v strede meraní:
+
+```{r, fig.width=8, fig.height=5, fig.align='center'}
+autoplot(window(dat$train$log, start=36, end=48), series="Namerané dáta") +
+  autolayer(window(dat$train$Tlin, start=36, end=48), series = "Lineárny trend") +
+  autolayer(window(dat$train$Tlin, start=36, end=48) + window(dat$train$SInd, start=36, end=48), series = "Lineárny trend + Sezónna zložka") +
+  labs(
+    title="Porovnanie nameraných dát s lineárnym trendom a goniometrickou sezónnou zložkou",
+    y = "Logaritmus počtu pasažierov",
+    x = "Počet mesiacov o začiatku merania")
+```
+
+Pozrime sa ešte na reziduá po odpočítaní sezónnej zložky:
+
+```{r, fig.width=8, fig.height=5, fig.align='center'}
+dat$train$resTSInd <- ts(dat$train$resT - dat$train$SInd)
+
+# zobrazenie
+autoplot(dat$train$resTSInd)
+```
+
+Nedá sa povedať, že by tieto reziduá vyzerali ako biely šum, skúsme teda použiť goniometrické funkcie.
+
+### Goniometrické funkcie
+
+```{r, fig.width=8, fig.height=5, fig.align='center'}
+dat$train$index <- seq(1, length(dat$train$observed))
+fit$SGon <- lm(resT ~ cos(2*pi*index/12) + sin(2*pi*index/12), dat$train)
+tmp <- fit$SGon |> coef() |> print()
+
+dat$train$SGon <- ts(fit$SGon$fitted.values)
+dat$train$resTSGon <- ts(fit$SGon$residuals)
+
+with(dat$train,{
+autoplot(resT, main = "Sezónna zložka") +
+  autolayer(SGon)
+})
+```
+
+Pri použití iba dvoch goniometrických funkcií na zachytenie sezónnej zložky s periódou 12 mesiacov výsledky nie sú až také presné ako pri použití indikačných funkcií. Reziduá v sebe očividne zahŕňajú ďalšie nezachytené sezónne zložky:
+
+```{r, fig.width=8, fig.height=5, fig.align='center'}
+autoplot(dat$train$resTSGon)
+```
+
+Mohli by sme spraviť sezónny model s viac parametrami, s rôznymi periódami ale keďže nie je úplne jasné, s akou periódou by sme mali sezónnu zložku hľadať, vystačíme si aj s týmto modelom. Pozrime sa ešte na porovnanie s nameranými dátami:
+
+```{r, fig.width=8, fig.height=5, fig.align='center'}
+autoplot(dat$train$log, series="Namerané dáta") +
+  autolayer(dat$train$Tlin, series = "Lineárny trend") +
+  autolayer(dat$train$Tlin + dat$train$SGon, series = "Lineárny trend + Sezónna zložka") +
+  labs(title="Porovnanie nameraných dát s lineárnym trendom a goniometrickou sezónnou zložkou",
+    y = "Logaritmus počtu pasažierov",
+       x = "Počet mesiacov o začiatku merania")
+```
+
+A pri priblížení na jednu periódu:
+
+```{r, fig.width=8, fig.height=5, fig.align='center'}
+autoplot(window(dat$train$log, start=36, end=48), series="Namerané dáta") +
+  autolayer(window(dat$train$Tlin, start=36, end=48), series = "Lineárny trend") +
+  autolayer(window(dat$train$Tlin + dat$train$SGon, start=36, end=48), series = "Lineárny trend + Sezónna zložka") +
+  labs(title="Porovnanie nameraných dát s lineárnym trendom a goniometrickou sezónnou zložkou",
+    y = "Logaritmus počtu pasažierov",
+       x = "Počet mesiacov o začiatku merania")
 ```
