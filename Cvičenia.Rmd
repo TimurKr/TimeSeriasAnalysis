@@ -247,3 +247,85 @@ autoplot(window(dat$train$log, start=36, end=48), series="Namerané dáta") +
     y = "Logaritmus počtu pasažierov",
        x = "Počet mesiacov o začiatku merania")
 ```
+
+Ďalej budeme preto pokračovať so sezónnou zložkou odhadnutou pomocou indikačných funkcií.
+
+### Analýza reziduí a ich spektrum
+
+Zobrazme si teraz spektrum reziduí, ktoré nám zostali po zahrnutí trendu a sezónnej zložky.
+
+```{r, fig.width=8, fig.height=5, fig.align='center'}
+autoplot(dat$train$resTSInd)
+library(lomb)
+tmp <- lomb::lsp(dat$train$resTSInd, type = "period", ofac = 10)
+tmp$peak.at
+```
+
+Vidíme, že pri hodnote 50 je štatisticky významná frekvencia, preto do modelu pridáme aj sezónnu zložku s periódou 50.
+
+```{r, fig.width=8, fig.height=5, fig.align='center'}
+fit$SGon50 <- lm(resT ~ cos(2*pi*index/50) + sin(2*pi*index/50), dat$train)
+tmp <- fit$SGon |> coef() |> print()
+
+dat$train$SGon50 <- ts(fit$SGon50$fitted.values)
+dat$train$resTSGon50 <- ts(fit$SGon50$residuals)
+
+with(dat$train,{
+autoplot(resTSInd, main = "Sezónna zložka") +
+  autolayer(SGon50)
+})
+```
+
+### Spoločný model
+
+Vytvorme teraz jeden spoločný model. Bude pozostávať z 
+- lineárneho trendu
+- sezónnej zložky pri použití indikačných funkcií s periódou 12 (1 rok)
+- sezónnej zložky pri použití goniometrických funkcií s periódou 50
+
+```{r, fig.width=8, fig.height=5, fig.align='center'}
+fit$Syst <- lm(log ~ Tlin + M + cos(2*pi*index/50) + sin(2*pi*index/50), dat$train)
+
+# Vykreslenie
+dat$train$Syst <- ts(fit$Syst$fitted.values)
+dat$train$resSyst <- ts(fit$Syst$residuals)
+
+with(dat$train,{
+autoplot(log, main = "Model") +
+  autolayer(Syst)
+})
+```
+
+Graf vyzerá na prvý pohlad velmi dobre, spravme ale analýzu reziduí, aby sme sa uistili, že náš model je naozaj správny a reziduá sa podobajú na biely šum.
+
+```{r, fig.width=8, fig.height=5, fig.align='center'}
+forecast::checkresiduals(fit$Syst)
+```
+
+Podľa Breusch-Godfrey testu môžeme zamietnuť hypotézu, že reziduá sú nekorelované, keďže p-hodnota je 0.002. Z korelogramu ale vidíme, že reziduá naozaj pripomínajú biely šum, až na zopár hodnôt. Najvýznamnejšia zvyšková autokorelácia nastáva práve pri K = 2 a K = 1.
+
+Spravme ešte iné testy:
+
+```{r, fig.width=8, fig.height=5, fig.align='center'}
+fit$Syst |> residuals() |> randtests::difference.sign.test()
+fit$Syst |> residuals() |> randtests::rank.test()
+fit$Syst |> car::durbinWatsonTest()
+fit$Syst |> residuals() |> randtests::turning.point.test()
+```
+
+Difference Sign Test potvrdzuje náhodnosť reziduí, Mann-Kendall Rank nezamieta hypotézu, že v reziduách nie je žiaden trend. Avšak DurbinWatsonov trend zamieta hypotézu, že by boli reziduá nekorelované a Turning Point Test zamieta aj náhodnosť reziduí. V reziduách sa teda určite nachádza ešte nejaká informácia, ktorú sme našim modelom nezachytili. Pokúsme sa ju modelovať ARMA procesom.
+
+#### ARMA proces
+
+Skúsme ARMA proces identifikovať najprv neparametricky
+
+```{r, fig.width=8, fig.height=5, fig.align='center'}
+acf(dat$train$resSyst, lag.max = 10)
+pacf(dat$train$resSyst, lag.max = 10)
+```
+
+```{r, fig.width=8, fig.height=5, fig.align='center'}
+ar(dat$train$resSyst, order.max = 5)$aic |>
+  plot(x = 0:5, xlab="p", ylab="dAIC", type="b")
+
+```
