@@ -16,7 +16,7 @@ library(knitr)
 Pre účely tohto semestra budeme používať dáta o množstve medzinárodných pasažierov leteckých spoločností. Dokumentácia k dátam je dostupná napríklad [tu](https://www.rdocumentation.org/packages/TSA/versions/1.3/topics/airpass).
 
 ```{r data, results='hide', message=FALSE}
-library (fpp2)
+library(fpp2)
 data(airpass)
 ```
 
@@ -28,9 +28,10 @@ Ide o časový rad s intervalom merania 1 mesiac, ktorý vyjadruje množstvo med
 ## Vykreslenie časového radu
 
 ```{r graph, fig.width=8, fig.height=5, fig.align='center'}
-plot(airpass,type = "l", main = "Medzinárodný pasažiery leteckých spoločností", 
-     xlab = "Čas", ylab = "Pasažiry (v tísícoch)")
-
+plot(airpass,
+  type = "l", main = "Medzinárodný pasažiery leteckých spoločností",
+  xlab = "Čas", ylab = "Pasažiry (v tísícoch)"
+)
 ```
 
 ## Základné údaje o časovom rade
@@ -46,11 +47,10 @@ summary_statistics <- data.frame(
 )
 
 kable(
-  summary_statistics, 
+  summary_statistics,
   caption = "Sumárne štatistiky pre airpass",
   booktabs = TRUE,
 )
-
 ```
 
 ## Rozdelenie na trénovaciu a vyhodnocovaciu zložku
@@ -61,31 +61,41 @@ Rozdelme dáta na trénovaciu (prvých 9 rokov) a vyhodnocovaciu (posledné 3 ro
 library(tsibble)
 library(dplyr)
 library(ggplot2)
+library(feasts)
 ```
 
 ```{r splitting, fig.width=8, fig.height=5, fig.align='center'}
-dat <- fit <- list()
+dat <- fun <- fit <- list()
 # Konverzia na tsibble
 dat$full$observed <- ts(airpass)
 
 # Rozdelenie urobíme po 9 rokoch
 ratio <- 0.75
 
-dat$train <- data.frame(observed = head(dat$full$observed, ratio*length(dat$full$observed)))
-dat$valid <- data.frame(observed = tail(dat$full$observed, (1-ratio)*length(dat$full$observed)))
-
-nT <- nrow(dat$train)
-nV <- nrow(dat$valid)
+dat$train <- data.frame(observed = head(
+  dat$full$observed,
+  ratio * length(dat$full$observed)
+))
+dat$valid <- data.frame(observed = tail(
+  dat$full$observed,
+  (1 - ratio) * length(dat$full$observed)
+))
 
 # Vykreslenie grafu
-list(train = dat$train$observed,
-     valid = dat$valid$observed) |> 
+list(
+  train = dat$train$observed,
+  valid = dat$valid$observed
+) |>
   with({
-    ggplot() + autolayer(train) + autolayer(valid) +
+    ggplot() +
+      autolayer(train) +
+      autolayer(valid) +
       scale_color_manual(values = c(train = 1, valid = 2)) +
       guides(color = guide_legend(title = "sample")) +
-      theme(legend.position = c(0.99, 0.01), 
-            legend.justification = c("right","bottom")) + 
+      theme(
+        legend.position = c(0.99, 0.01),
+        legend.justification = c("right", "bottom")
+      ) +
       labs(x = "year", y = "observed")
   })
 ```
@@ -93,7 +103,7 @@ list(train = dat$train$observed,
 # Dekompozícia časového radu
 
 ## Stabilizácia
-Vidíme že časový rad obsahuje veľmi jasný stúpajúci trend, ktorý sa bude dať modelovať lineárnym modelom, alebo prípadne exponenciálnym. Zároveň je úplne evidentná sezónna zložka, ktorá bude mať periódu pravdepodobne 1 rok, čiže 12 meraní. Zároveň vidíme, že amplitúda rozptylu je závislá od trendu. 
+Vidíme že časový rad obsahuje veľmi jasný stúpajúci trend, ktorý sa bude dať modelovať lineárnym modelom, alebo prípadne exponenciálnym. Zároveň je úplne evidentná sezónna zložka, ktorá bude mať periódu pravdepodobne 1 rok, čiže 12 meraní. Vidíme ale aj to, že amplitúda rozptylu je závislá od trendu. 
 
 Predpokladajme teda na chvíľu, že ide o exponenciálny trend, potom môžeme časový rad logaritmovať, čím dosiahneme stacionaritu a neskôr môžme skúmať trend ako lineárny.
 
@@ -105,17 +115,21 @@ dat$train$log <- log(dat$train$observed)
 autoplot(dat$train$log)
 ```
 
-Vidíme, že toto účel splnilo, nakoľko máme jasný stacionárny rad s lineárnym trendom. Ďalej budeme teda analyzovať aj tento časový rad.
+Logaritmovanie účel očividne splnilo, nakoľko máme jasný stacionárny rad s lineárnym trendom. Ďalej budeme teda analyzovať tento časový rad.
 
 ## Odhadnutie trendu
 
 Odhadnime trend logaritmizovaného časového radu a vypočítajme jeho štatistickú významnosť.
 
 ```{r trend}
-fit$Tlin <- with(data = dat$train,
-                 forecast::tslm(log ~ trend)
-                 )
-fit$Tlin |> summary() |> coef() |> round(4)
+fit$Tlin <- with(
+  data = dat$train,
+  forecast::tslm(log ~ trend)
+)
+fit$Tlin |>
+  summary() |>
+  coef() |>
+  round(4)
 ```
 
 Vidíme že Pr hodnota je 0, teda nájdený trend je štatisticky významný. Vykreslime si ho:
@@ -123,10 +137,11 @@ Vidíme že Pr hodnota je 0, teda nájdený trend je štatisticky významný. Vy
 ```{r, fig.width=8, fig.height=5, fig.align='center'}
 dat$train$Tlin <- fitted(fit$Tlin)
 
-with(dat$train,
-     forecast::autoplot(log) + 
-       forecast::autolayer(Tlin, color = 4, show.legend = FALSE) + 
-       ylab("")
+with(
+  dat$train,
+  forecast::autoplot(log) +
+    forecast::autolayer(Tlin, color = 4, show.legend = FALSE) +
+    ylab("")
 )
 ```
 
@@ -139,8 +154,8 @@ Vykreslime si rezíduá po odpočítaní nájdeného trendu a príslušný korel
 ```{r, fig.width=8, fig.height=5, fig.align='center'}
 dat$train$resT <- dat$train$log - dat$train$Tlin
 with(dat$train, {
-  forecast::autoplot(resT) |> print();
-  forecast::Acf(resT, plot = FALSE) |> 
+  forecast::autoplot(resT) |> print()
+  forecast::Acf(resT, plot = FALSE) |>
     forecast::autoplot(show.legend = FALSE) + ggtitle("")
 })
 ```
@@ -152,17 +167,22 @@ Na korelograme je jasne vidieť sezónnu zložku s periódou 12, čo zodpovedá 
 Skúsme teda nájsť príslušnú sezónnu zložku pomocou indikačných funkcií.
 
 ```{r, fig.width=8, fig.height=5, fig.align='center'}
-#Pridáme premennú indikujúcu mesiac
+# Pridáme premennú indikujúcu mesiac
 dat$train$M <- factor(rep(1:12, length.out = length(dat$train$observed)))
 
 fit$SInd <- lm(resT ~ M, dat$train)
 
-dat$train$SInd <- fit$SInd |> fitted() |> 
-  ts() |> `tsp<-`(tsp(dat$train$HDP))
+dat$train$SInd <- fit$SInd |>
+  fitted() |>
+  ts() |>
+  `tsp<-`(tsp(dat$train$HDP))
 with(dat$train, {
   plot(resT)
   lines(SInd, col = 12, lwd = 2)
-  plot(1:12, SInd[1:12], xaxt="n", xlab="mesiac", ylab = "Sezónna zložka", type = "b", col = 4)
+  plot(1:12, SInd[1:12],
+    xaxt = "n", xlab = "mesiac",
+    ylab = "Sezónna zložka", type = "b", col = 4
+  )
   axis(1, at = 1:12, labels = 1:12)
 })
 ```
@@ -172,25 +192,37 @@ Na prvom grafe vidíme modrou náš sezónny model a čiernou reziduá po odpoč
 Vykreslime si trend spolu so sezónnou zložkou v porovnaní s nameranými dátami.
 
 ```{r, fig.width=8, fig.height=5, fig.align='center'}
-autoplot(dat$train$log, series="Namerané dáta") +
+autoplot(dat$train$log, series = "Namerané dáta") +
   autolayer(dat$train$Tlin, series = "Lineárny trend") +
-  autolayer(dat$train$Tlin + dat$train$SInd, series = "Lineárny trend + Sezónna zložka") +
+  autolayer(dat$train$Tlin + dat$train$SInd,
+    series = "Lineárny trend + Sezónna zložka"
+  ) +
   labs(
-    title="Porovnanie nameraných dát s lineárnym trendom a goniometrickou sezónnou zložkou",
+    title = "Porovnanie nameraných dát s lineárnym trendom a goniometrickou sezónnou zložkou", # nolint
     y = "Logaritmus počtu pasažierov",
-    x = "Počet mesiacov o začiatku merania")
+    x = "Počet mesiacov o začiatku merania"
+  )
 ```
 
 A keď sa pozrieme iba na jednu periódu v strede meraní:
 
 ```{r, fig.width=8, fig.height=5, fig.align='center'}
-autoplot(window(dat$train$log, start=36, end=48), series="Namerané dáta") +
-  autolayer(window(dat$train$Tlin, start=36, end=48), series = "Lineárny trend") +
-  autolayer(window(dat$train$Tlin, start=36, end=48) + window(dat$train$SInd, start=36, end=48), series = "Lineárny trend + Sezónna zložka") +
+autoplot(window(dat$train$log, start = 36, end = 48),
+  series = "Namerané dáta"
+) +
+  autolayer(window(dat$train$Tlin, start = 36, end = 48),
+    series = "Lineárny trend"
+  ) +
+  autolayer(
+    window(dat$train$Tlin, start = 36, end = 48) +
+      window(dat$train$SInd, start = 36, end = 48),
+    series = "Lineárny trend + Sezónna zložka"
+  ) +
   labs(
-    title="Porovnanie nameraných dát s lineárnym trendom a goniometrickou sezónnou zložkou",
+    title = "Porovnanie nameraných dát s lineárnym trendom a goniometrickou sezónnou zložkou", # nolint
     y = "Logaritmus počtu pasažierov",
-    x = "Počet mesiacov o začiatku merania")
+    x = "Počet mesiacov o začiatku merania"
+  )
 ```
 
 Pozrime sa ešte na reziduá po odpočítaní sezónnej zložky:
@@ -208,15 +240,20 @@ Nedá sa povedať, že by tieto reziduá vyzerali ako biely šum, skúsme teda p
 
 ```{r, fig.width=8, fig.height=5, fig.align='center'}
 dat$train$index <- seq(1, length(dat$train$observed))
-fit$SGon <- lm(resT ~ cos(2*pi*index/12) + sin(2*pi*index/12), dat$train)
-tmp <- fit$SGon |> coef() |> print()
+fit$SGon <- lm(
+  resT ~ cos(2 * pi * index / 12) + sin(2 * pi * index / 12),
+  dat$train
+)
+tmp <- fit$SGon |>
+  coef() |>
+  print()
 
 dat$train$SGon <- ts(fit$SGon$fitted.values)
 dat$train$resTSGon <- ts(fit$SGon$residuals)
 
-with(dat$train,{
-autoplot(resT, main = "Sezónna zložka") +
-  autolayer(SGon)
+with(dat$train, {
+  autoplot(resT, main = "Sezónna zložka") +
+    autolayer(SGon)
 })
 ```
 
@@ -229,28 +266,40 @@ autoplot(dat$train$resTSGon)
 Mohli by sme spraviť sezónny model s viac parametrami, s rôznymi periódami ale keďže nie je úplne jasné, s akou periódou by sme mali sezónnu zložku hľadať, vystačíme si aj s týmto modelom. Pozrime sa ešte na porovnanie s nameranými dátami:
 
 ```{r, fig.width=8, fig.height=5, fig.align='center'}
-autoplot(dat$train$log, series="Namerané dáta") +
+autoplot(dat$train$log, series = "Namerané dáta") +
   autolayer(dat$train$Tlin, series = "Lineárny trend") +
-  autolayer(dat$train$Tlin + dat$train$SGon, series = "Lineárny trend + Sezónna zložka") +
-  labs(title="Porovnanie nameraných dát s lineárnym trendom a goniometrickou sezónnou zložkou",
+  autolayer(dat$train$Tlin + dat$train$SGon,
+    series = "Lineárny trend + Sezónna zložka"
+  ) +
+  labs(
+    title = "Porovnanie nameraných dát s lineárnym trendom a goniometrickou sezónnou zložkou", # nolint
     y = "Logaritmus počtu pasažierov",
-       x = "Počet mesiacov o začiatku merania")
+    x = "Počet mesiacov o začiatku merania"
+  )
 ```
 
 A pri priblížení na jednu periódu:
 
 ```{r, fig.width=8, fig.height=5, fig.align='center'}
-autoplot(window(dat$train$log, start=36, end=48), series="Namerané dáta") +
-  autolayer(window(dat$train$Tlin, start=36, end=48), series = "Lineárny trend") +
-  autolayer(window(dat$train$Tlin + dat$train$SGon, start=36, end=48), series = "Lineárny trend + Sezónna zložka") +
-  labs(title="Porovnanie nameraných dát s lineárnym trendom a goniometrickou sezónnou zložkou",
+autoplot(window(dat$train$log, start = 36, end = 48),
+  series = "Namerané dáta"
+) +
+  autolayer(window(dat$train$Tlin, start = 36, end = 48),
+    series = "Lineárny trend"
+  ) +
+  autolayer(window(dat$train$Tlin + dat$train$SGon, start = 36, end = 48),
+    series = "Lineárny trend + Sezónna zložka"
+  ) +
+  labs(
+    title = "Porovnanie nameraných dát s lineárnym trendom a goniometrickou sezónnou zložkou", # nolint
     y = "Logaritmus počtu pasažierov",
-       x = "Počet mesiacov o začiatku merania")
+    x = "Počet mesiacov o začiatku merania"
+  )
 ```
 
 Ďalej budeme preto pokračovať so sezónnou zložkou odhadnutou pomocou indikačných funkcií.
 
-### Analýza reziduí a ich spektrum
+## Analýza reziduí a ich spektrum
 
 Zobrazme si teraz spektrum reziduí, ktoré nám zostali po zahrnutí trendu a sezónnej zložky.
 
@@ -264,35 +313,46 @@ tmp$peak.at
 Vidíme, že pri hodnote 50 je štatisticky významná frekvencia, preto do modelu pridáme aj sezónnu zložku s periódou 50.
 
 ```{r, fig.width=8, fig.height=5, fig.align='center'}
-fit$SGon50 <- lm(resT ~ cos(2*pi*index/50) + sin(2*pi*index/50), dat$train)
-tmp <- fit$SGon |> coef() |> print()
+fit$SGon50 <- lm(
+  resT ~ cos(2 * pi * index / 50) + sin(2 * pi * index / 50),
+  dat$train
+)
+tmp <- fit$SGon |>
+  coef() |>
+  print()
 
 dat$train$SGon50 <- ts(fit$SGon50$fitted.values)
 dat$train$resTSGon50 <- ts(fit$SGon50$residuals)
 
-with(dat$train,{
-autoplot(resTSInd, main = "Sezónna zložka") +
-  autolayer(SGon50)
+with(dat$train, {
+  autoplot(resTSInd, main = "Sezónna zložka") +
+    autolayer(SGon50)
 })
 ```
 
-### Spoločný model
+## Spoločný model
 
 Vytvorme teraz jeden spoločný model. Bude pozostávať z 
-- lineárneho trendu
-- sezónnej zložky pri použití indikačných funkcií s periódou 12 (1 rok)
-- sezónnej zložky pri použití goniometrických funkcií s periódou 50
+
+ * lineárneho trendu
+ * sezónnej zložky pri použití indikačných funkcií s periódou 12 meraní (1 rok)
+ * sezónnej zložky pri použití goniometrických funkcií s periódou 50
 
 ```{r, fig.width=8, fig.height=5, fig.align='center'}
-fit$Syst <- lm(log ~ Tlin + M + cos(2*pi*index/50) + sin(2*pi*index/50), dat$train)
+fit$Syst <- lm(
+  log ~ Tlin + M + cos(2 * pi * index / 50) + sin(2 * pi * index / 50),
+  dat$train
+)
+
+summary(fit$Syst)$coefficients
 
 # Vykreslenie
 dat$train$Syst <- ts(fit$Syst$fitted.values)
 dat$train$resSyst <- ts(fit$Syst$residuals)
 
-with(dat$train,{
-autoplot(log, main = "Model") +
-  autolayer(Syst)
+with(dat$train, {
+  autoplot(log, main = "Model") +
+    autolayer(Syst)
 })
 ```
 
@@ -302,30 +362,260 @@ Graf vyzerá na prvý pohlad velmi dobre, spravme ale analýzu reziduí, aby sme
 forecast::checkresiduals(fit$Syst)
 ```
 
-Podľa Breusch-Godfrey testu môžeme zamietnuť hypotézu, že reziduá sú nekorelované, keďže p-hodnota je 0.002. Z korelogramu ale vidíme, že reziduá naozaj pripomínajú biely šum, až na zopár hodnôt. Najvýznamnejšia zvyšková autokorelácia nastáva práve pri K = 2 a K = 1.
+Podľa Breusch-Godfrey testu môžeme zamietnuť hypotézu, že reziduá sú nekorelované, keďže p-hodnota je 0.002. Z korelogramu ale vidíme, že reziduá naozaj pripomínajú biely šum, až na zopár hodnôt. Najvýznamnejšia zvyšková autokorelácia nastáva práve pri K = 2 a K = 1. Z toho sa dá usúdiť, že budeme musieť ďalej modelovať ich autokorelačnú štruktúru pomocou lineárnych modelov stacionárnch radov.
 
 Spravme ešte iné testy:
 
 ```{r, fig.width=8, fig.height=5, fig.align='center'}
-fit$Syst |> residuals() |> randtests::difference.sign.test()
-fit$Syst |> residuals() |> randtests::rank.test()
+fit$Syst |>
+  residuals() |>
+  randtests::difference.sign.test()
+fit$Syst |>
+  residuals() |>
+  randtests::rank.test()
 fit$Syst |> car::durbinWatsonTest()
-fit$Syst |> residuals() |> randtests::turning.point.test()
+fit$Syst |>
+  residuals() |>
+  randtests::turning.point.test()
 ```
 
-Difference Sign Test potvrdzuje náhodnosť reziduí, Mann-Kendall Rank nezamieta hypotézu, že v reziduách nie je žiaden trend. Avšak DurbinWatsonov trend zamieta hypotézu, že by boli reziduá nekorelované a Turning Point Test zamieta aj náhodnosť reziduí. V reziduách sa teda určite nachádza ešte nejaká informácia, ktorú sme našim modelom nezachytili. Pokúsme sa ju modelovať ARMA procesom.
+Difference Sign Test potvrdzuje náhodnosť reziduí, Mann-Kendall Rank nezamieta hypotézu, že v reziduách nie je žiaden trend, teda trend sme odstránili úpešne. Avšak DurbinWatsonov trend zamieta hypotézu, že by boli reziduá nekorelované a Turning Point Test zamieta aj náhodnosť reziduí. V reziduách sa teda určite nachádza ešte nejaká informácia, ktorú sme našim modelom nezachytili. V ďelšej skecií sa ju pokúsime modelovať ARMA procesom. Predtým ale ešte zhrňme intenzitu každej systematickej zložky.
 
-#### ARMA proces
+```{r, fig.width=8, fig.height=5, fig.align='center'}
+# Extract the components of the model and display
+tmp <- predict(fit$Syst, type = "terms")
+with(data.frame(
+  index = dat$train$index,
+  Tlin = tmp[, 1],
+  M = tmp[, 2],
+  cos = tmp[, 3],
+  sin = tmp[, 4],
+  res = dat$train$resSyst
+), {
+  # Plot the components
+  plot(Tlin ~ index, type = "l", ylab = "")
+  lines(M ~ index)
+  lines(cos ~ index)
+  lines(sin ~ index)
+  # Intensity of the components
+  cat("Intensity of the systematic components: \n")
+  resvar <- var(res)
+  (1 - resvar / c(
+    Tlin = var(Tlin + res),
+    M = var(M + res),
+    cos = var(cos + res),
+    sin = var(sin + res)
+  )
+  ) |> round(2)
+})
+```
+
+### ARMA proces
 
 Skúsme ARMA proces identifikovať najprv neparametricky
 
 ```{r, fig.width=8, fig.height=5, fig.align='center'}
-acf(dat$train$resSyst, lag.max = 10)
-pacf(dat$train$resSyst, lag.max = 10)
+with(dat$train, {
+  plot(resSyst, type = "l")
+  acf(resSyst, lag.max = 12, ylab = "(P)ACF", main = "", lwd = 2)
+  parc <- pacf(resSyst, lag.max = 12, plot = FALSE)
+  points(parc$lag + 0.1, parc$acf, col = "red", type = "h", lwd = 2)
+  legend("topright",
+    legend = c("ACF", "PACF"),
+    col = c("black", "red"), lty = c(1, 1), lwd = 2
+  )
+})
+```
+
+Čisto z ACF a PACF iba ťažko určiť stupeň a typ procesu, ale vyzerá, že PACF klesá k nule skokovejšie a priamejšie, preto by sa dalo usúdiť, že ide o AR(1). 
+
+Skúsme použiť parametrický prístup, ktorý nám odhalí o ktorý proces ide snáď jasnejšie.
+
+```{r, echo=FALSE, message=FALSE}
+# Informačné kritériá pre 3 triedy modelov.
+# Argumenty:
+# model - objekt triedy 'ar', 'Arima' alebo 'lm',
+# type - typ informačného kritéria.
+# Výstup: hodnota AIC alebo BIC.
+fun$InfCrit <- function(model, type = c("AIC", "BIC")) {
+  if (class(model) == "ar") {
+    n <- model$n.used
+    sig2 <- model$var.pred
+    pq <- sum(model$order)
+  }
+  if (class(model) == "Arima") {
+    n <- model$nobs
+    sig2 <- model$sigma2
+    pq <- sum(model$arma[1:2])
+  }
+  if ("lm" %in% class(model)) {
+    n <- length(model$residuals)
+    sig2 <- var(model$residuals)
+    pq <- sum(attr(model$terms, "order"))
+  }
+  switch(type[1],
+    AIC = log(sig2) + pq * 2 / n,
+    BIC = log(sig2) + pq * log(n) / n
+  )
+}
+
+# Odhad parametrov ARMA pomocou Long AR metódy.
+# Argumenty:
+# x - numerický vektor časového radu,
+# p,q - stupne ARMA,
+# k - stupeň AR, z ktorého sa získa odhad rezíduí (šumu),
+# z - vektor rezíduí (šumu). Ak nie je daný, bude odhadnutý z AR(k) modelu.
+# Výstup: objekt triedy 'lm'.
+fun$LongAR <- function(x, p, q, k, z = NULL) {
+  if (is.null(z)) {
+    z <- ar.ols(x, aic = FALSE, order.max = k)$resid
+  } # získame rezíduá z AR
+  z[is.na(z)] <- 0 # nahradíme chýbajúce hodnoty zo začiatku
+  xzlag <- c(
+    lapply(0:p, function(i) stats::lag(x, -i)),
+    lapply(0:q, function(i) stats::lag(z, -i))
+  )
+  names(xzlag) <- c(paste0("x", 0:p), paste0("z", 0:q)) # oznacenie premennych
+  xzlag <- do.call(
+    function(...) ts.intersect(..., dframe = TRUE),
+    xzlag
+  ) # urezanie prekrytu
+  lm(x0 ~ . - z0, xzlag, na.action = NULL, singular.ok = FALSE, y = TRUE)
+}
+
+# Hannan-Rissanenova procedúra pre odhad moelu ARMA
+# Argumenty:
+# x - numerický vektor časového radu,
+# pmax, qmax - hranice stupňov ARMA,
+# kmax - strop pre určenie stupňa AR, z ktorého sa odhadnú rezíduá (šum),
+# N_bestmodels - počet najlepších modelov, ktoré funkcia vráti ako objekty 'lm'.
+# Výstup: zoznam s modelmi a vektorom BIC.
+fun$HannanRissanen <- function(x, pmax, qmax, kmax, n_bestmodels = 1) {
+  krange <- pmax:kmax
+  names(krange) <- krange # názvy sa zídu na identifikáciu ...
+  tmp <- sapply(krange, function(y) {
+    fun$InfCrit(ar(x,
+      aic = FALSE,
+      order.max = y
+    ))
+  })
+  k <- as.numeric(names(sort(tmp)[1])) # ... rádu AR s najmenším AIC
+  resid <- ar(x, aic = FALSE, order.max = k)$resid
+  models <- list() # sem budeme ukladať kandidátov
+  for (p in 0:pmax) {
+    for (q in 0:qmax) { # ARMA(0,0) pre kontrolu aj pre jednoduchosť programu
+      models[[paste(p, q, sep = ",")]] <- fun$LongAR(x, p = p, q = q, z = resid)
+    }
+  }
+  #' výpočet BIC pre každý kandidátsky model
+  bic <- rbind(
+    varBIC = sapply(models, function(x) fun$InfCrit(x, type = "BIC")),
+    likBIC = sapply(models, function(x) BIC(x))
+  )
+  ord <- order(bic[1, ]) # zoradenie podľa BIC
+  list(
+    models = models[ord][1:n_bestmodels], # i keď modely tu nebudeme potrebovať
+    BIC = bic[, ord]
+  )
+}
 ```
 
 ```{r, fig.width=8, fig.height=5, fig.align='center'}
-ar(dat$train$resSyst, order.max = 5)$aic |>
-  plot(x = 0:5, xlab="p", ylab="dAIC", type="b")
+tmp <- fun$HannanRissanen(dat$train$resSyst, pmax = 6, qmax = 6, kmax = 10)
 
+plot(scale(tmp$BIC["varBIC", ]),
+  xlab = "p,q", ylab = "normované BIC", main = "ARMA(p,q) pre resSyst",
+  xaxt = "n", type = "b"
+) # naše BIC vypočítané z reziduálneho rozptylu
+points(scale(tmp$BIC["likBIC", ]),
+  col = "blue", type = "b"
+) # vstavané BIC z vierohodnosti
+axis(1,
+  at = 1:ncol(tmp$BIC),
+  labels = colnames(tmp$BIC), las = 2, cex.axis = 0.6
+) # zobrazenie popisov
 ```
+
+Z grafu sa javý najvhodnejší práve AR(1), prípadne MA(1) alebo ARMA(1,1), podobne ako sme uvážili aj z neparametrického prístupu. Pokračovať teda budeme s AR(1) a MA(1). Odhadnime ich parametre:
+
+```{r, fig.width=8, fig.height=5, fig.align='center'}
+fit$Res <- list(
+  AR1 = arima(dat$train$resSyst, order = c(1, 0, 0)),
+  MA1 = arima(dat$train$resSyst, order = c(0, 0, 1))
+)
+
+# Výpis parametrov
+lapply(fit$Res, function(x) {
+  coef(x) |>
+    round(4)
+})
+
+local({
+  for (i in names(fit$Res)) {
+    if (i != "AR1") {
+      cat("\n\n")
+    }
+    cat(i, "\n")
+    model <- fit$Res[[i]]
+    cat(
+      "Stacionarita:\n\t",
+      coef(model) |>
+        head(model$arma[1]) |>
+        append(values = 1, after = 0) |>
+        polyroot() |>
+        Mod() |>
+        round(2),
+      "\n"
+    )
+    cat(
+      "Nekorelovanosť:\n\t",
+      sapply(
+        1:11,
+        function(x) Box.test(model$residuals, lag = x)$p.value
+      ) |> round(3),
+      "\n\n"
+    )
+    cat("Normalita:\n")
+    cat(
+      "\tShapiro: ",
+      shapiro.test(model$residuals)$p.value |> round(3), "\t"
+    )
+    cat(
+      "Jarque-Bera: ",
+      tseries::jarque.bera.test(model$residuals)$p.value |> round(3),
+      "\n"
+    )
+  }
+})
+```
+
+Ukázalo sa, že model AR(1) nám zaručuje vyššiu mieru nekorelovanosti reziduií pre všetky rôzne časové kroky. Normalitu nezamietame ani pri jednom z týchto dvoch modelov a pri procese AR(1) sa dokonca potvrdila aj stacionarita, ktorá je pri MA(1) splnená automaticky. 
+
+Pozrime sa na reziduá po započítaní AR(1) do nášho modelu:
+```{r, fig.width=8, fig.height=5, fig.align='center'}
+dat$train$AR1 <- fitted(fit$Res$AR1)
+dat$train$SystAR <- dat$train$Syst + dat$train$AR1
+
+# Rezisuals
+with(dat$train, {
+  autoplot(resSyst,
+    main = "Porovnanie reziduí pred a po zahrnutí AR(1)",
+    series = "Pred zahrnutím AR(1)", linetype = "dashed"
+  ) +
+    autolayer(fit$Res$AR1$residuals,
+      series = "Po zahrnutím AR(1)"
+    )
+})
+
+forecast::checkresiduals(fit$Res$AR1)
+```
+
+Zostáva nám už iba vykresliť systematický model spolu s AR(1) a porovnať ho s nameranými dátami.
+
+```{r, fig.width=8, fig.height=5, fig.align='center'}
+with(dat$train, {
+  autoplot(log, main = "Porovnanie modelu s nameranými dátami", series = "Namerané logaritmizované dáta") +
+    autolayer(SystAR, series = "Model")
+})
+```
+
