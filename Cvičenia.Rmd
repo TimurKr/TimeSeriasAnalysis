@@ -630,21 +630,11 @@ with(dat$train, {
 Pre jednoduchosť použijeme model systematických zložiek ktorý sme už použili a k nemu pridáme AR(1) model reziduálnej zložky.
 
 ```{r, fig.width=8, fig.height=5, fig.align='center'}
-fit$All <- arima(log(dat$train$log),
+fit$All <- arima(log(dat$train$observed),
   order = c(1, 0, 0),
   xreg = model.matrix(fit$Syst),
   include.mean = FALSE
 )
-
-# fun$fitted.arima <- function(model) {
-#   eval(model$call$x) - model$residuals
-# }
-
-# uloženie stredných hodnôt
-# dat$train[paste0("All_", names(fit$All))] <-
-#   (eval(fit$All$call$x) - fit$All$residuals) |>
-#   lapply(exp) |>
-#   as.data.frame()
 ```
 
 ## Diagnostika spoločného modelu
@@ -709,9 +699,9 @@ tmp <- predict(fit$All,
 )
 dat$valid <- dat$valid |>
   transform(
-    multi = exp(exp(tmp$pred)), # stredná hodnota
-    multi_lo = exp(exp(tmp$pred - 2 * tmp$se)),
-    multi_hi = exp(exp(tmp$pred + 2 * tmp$se))
+    multi = exp(tmp$pred), # stredná hodnota
+    multi_lo = exp(tmp$pred - 2 * tmp$se),
+    multi_hi = exp(tmp$pred + 2 * tmp$se)
   )
 
 with(dat$valid, {
@@ -876,7 +866,6 @@ dat$valid <- dat$valid |>
   )
 
 
-# BUG: Toto nefunguje!!! neviem prečo...
 # naše modely
 tmp <- list(
   pred = fun$Forecast(fit$All,
@@ -889,9 +878,9 @@ tmp <- list(
 )
 dat$valid <- dat$valid |>
   transform(
-    single = exp(exp(tmp$pred)), # stredná hodnota
-    single_lo = exp(exp(tmp$pred - 2 * tmp$se)),
-    single_hi = exp(exp(tmp$pred + 2 * tmp$se))
+    single = exp(tmp$pred), # stredná hodnota
+    single_lo = exp(tmp$pred - 2 * tmp$se),
+    single_hi = exp(tmp$pred + 2 * tmp$se)
   )
 
 
@@ -943,17 +932,17 @@ fun$MeanForecastError <- function(x) { # x = cbind(predicted, real)
 with(dat$valid, list(
   "Jednokroková naivná" = cbind(single_naive, observed),
   "Jednokroková sezónna naivná" = cbind(single_naive_seas, observed),
-  # "Jednokrokový model" = cbind(single, observed),
+  "Jednokrokový model" = cbind(single, observed),
   "Viackroková naivná" = cbind(multi_naive, observed),
   "Viackroková sezónna naivná" = cbind(multi_naive_seas, observed),
   "Viackrokový model" = cbind(multi, observed)
-)) |>
+))|>
   sapply(fun$MeanForecastError) |>
   t() |>
   round(2)
 ```
 
-Z chýb vidíme, že naivné sezónne predpovede sú omnoho presnejšie ako obyčajné naivné. Zároveň sa ukázalo, že náš model nevykazuje väčšiu presnosť ako naivné sezónne predpovede.
+Z chýb vidíme, že naivné sezónne predpovede sú omnoho presnejšie ako obyčajné naivné. Pri jednokrokových predpovediach sa najpresnejšie správa náš model, čo bolo vidieť aj na grafe. Avšak pri viackrokových, ktoré sú v praxy omnoho užitočnejšie, vidíme, že náš model nevykazuje väčšiu presnosť ako naivné sezónne predpovede.
 
 ## Záver
 
