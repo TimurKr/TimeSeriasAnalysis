@@ -62,6 +62,7 @@ library(tsibble)
 library(dplyr)
 library(ggplot2)
 library(feasts)
+library(fabletools)
 ```
 
 ```{r splitting, fig.width=8, fig.height=5, fig.align='center'}
@@ -917,7 +918,7 @@ with(dat$valid, {
 Vypočítajme stredné chyby rôznych predpovedí.
 
 ```{r, fig.width=8, fig.height=5, fig.align='center'}
-fun$MeanForecastError <- function(x) { # x = cbind(predicted, real)
+fun$MeanForecastError <- function(x) {
   er <- x[, 2] - x[, 1] # predpovedné chyby
   c(
     ME = mean(er), # stredná chyba (mean error)
@@ -936,7 +937,7 @@ with(dat$valid, list(
   "Viackroková naivná" = cbind(multi_naive, observed),
   "Viackroková sezónna naivná" = cbind(multi_naive_seas, observed),
   "Viackrokový model" = cbind(multi, observed)
-))|>
+)) |>
   sapply(fun$MeanForecastError) |>
   t() |>
   round(2)
@@ -944,7 +945,7 @@ with(dat$valid, list(
 
 Z chýb vidíme, že naivné sezónne predpovede sú omnoho presnejšie ako obyčajné naivné. Pri jednokrokových predpovediach sa najpresnejšie správa náš model, čo bolo vidieť aj na grafe. Avšak pri viackrokových, ktoré sú v praxy omnoho užitočnejšie, vidíme, že náš model nevykazuje väčšiu presnosť ako naivné sezónne predpovede.
 
-## Záver
+## Vyhodnotenie
 
 Zobrazme si teraz trénovaciu a testovaciu vzorku spolu s našim modelom a predpoveďami, aby sme mohli nakoniec ešte okometricky zhodnotiť schopnosť nášho modelu predpovedať.
 
@@ -965,3 +966,146 @@ legend("topleft",
 ```
 
 Z grafu vidíme, že náš model je nameraným dátam veľmi blízko pri trénovacej vzorke, avšak pri testovacej už menej. My sme rátali s exponenciálnym rastom, nakoľko sme pracovali s logaritmizovanými dátami a lineárnym trendom, ukazuje sa ale, že testovacia vzorka tento exponenciálny rast nespĺňa. Na druhú stranu sezónnosť dát sa nám podarilo zachytiť veľmi presne. 
+
+# Modelovanie integrovaných procesov
+
+## Identifikácia stochastického trendu v našom modely
+
+Posúďme najprv pomocou rozšíreného Dickeyho-Fullerovho testu, či náš stacionarizový časový rad obsahuje proces náhodnej prechádzky. Pracujem ale odteraz s novým systematickym modelom, ktorý nebude obsahovať cyklickú zložku s periódov 50.
+  
+```{r, fig.width=8, fig.height=5, fig.align='center'}
+fit$Syst <- lm(
+  log(observed) ~ index + factor(rep(1:12, length.out = length(observed))),
+  dat$train
+)
+dat$train$Syst <- ts(fit$Syst$fitted.values)
+dat$train$resSyst <- ts(fit$Syst$residuals)
+
+# ADF test
+library(tseries)
+autoplot(dat$train$resSyst)
+adf.test(dat$train$resSyst)
+kpss.test(dat$train$resSyst)
+```
+
+Nulová hypotéza Dickey-Fullerovho testu predpokladá, že časový rad nie je stacionátrny, p-hodnota je ale menšia ako 0.05, teda môžeme zamietnuť nulovú hypotézu a usúdiť, že ide o stacionárny rad. Podobne ale opačne to platí aj pri KPSS teste, tiež môžeme usúdiť že reziduá po našom modely sú stacionárne. Stochastický trend sa v ňom preto nachádzať nebude.
+
+## Budovanie SARIMA modelov
+
+Skúsme teraz vytvoriť jeden model, ktorý bude obsahovať aj trend, sezónnu zložku aj ARMA proces. Pracovať preto budeme s už logaritmovanými dátami. Z predošlých kapitol vieme, že na reziduá sedí najviac AR(1), MA(1) alebo ARMA(1,1), analyzujme teda tieto 3.
+
+```{r, fig.width=8, fig.height=5, fig.align='center'}
+fit$Int$`SARIMA(1,1,0)(1,1,0)_12` <- Arima(dat$train$observed,
+  order = c(0, 1, 1),
+  seasonal = list(order = c(0, 1, 1), period = 12), lambda = "auto"
+)
+fit$Int$`SARIMA(0,1,1)(0,1,1)_12` <- Arima(dat$train$observed,
+  order = c(1, 1, 0),
+  seasonal = list(order = c(1, 1, 0), period = 12), lambda = "auto"
+)
+fit$Int$`SARIMA(1,1,1)(1,1,1)_12` <- Arima(dat$train$observed,
+  order = c(1, 1, 1),
+  seasonal = list(order = c(1, 1, 1), period = 12), lambda = "auto"
+)
+checkresiduals(fit$Int$`SARIMA(1,1,0)(1,1,0)_12`)
+checkresiduals(fit$Int$`SARIMA(0,1,1)(0,1,1)_12`)
+checkresiduals(fit$Int$`SARIMA(1,1,1)(1,1,1)_12`)
+```
+
+Všetky 3 modely vyzerajú na prvý pohľad veľmi podobne. Pozrime sa na ich chyby.
+  
+```{r, fig.width=8, fig.height=5, fig.align='center'}
+accuracy(fit$Int$`SARIMA(1,1,0)(1,1,0)_12`)
+accuracy(fit$Int$`SARIMA(0,1,1)(0,1,1)_12`)
+accuracy(fit$Int$`SARIMA(1,1,1)(1,1,1)_12`)
+```
+
+Vídíme, že aj tieto hodnoty sú si veľmi blízke. Nevieme jasne určiť, ktorý model je najlepší. Vykreslime si ich preto spolu s trénovaciou vzorkou.
+  
+```{r, fig.width=8, fig.height=5, fig.align='center'}
+autoplot(forecast(fit$Int$`SARIMA(1,1,0)(1,1,0)_12`, h = 36)) +
+  autolayer(dat$full$observed)
+autoplot(forecast(fit$Int$`SARIMA(0,1,1)(0,1,1)_12`, h = 36)) +
+  autolayer(dat$full$observed)
+autoplot(forecast(fit$Int$`SARIMA(1,1,1)(1,1,1)_12`, h = 36)) +
+  autolayer(dat$full$observed)
+```
+
+Pri viackrokovej predpovedi už badáme rozdiel, najpresnejšie sa javý práve SARIMA(1,1,0)(1,1,0). Porovnajme teraz predpovede s naivnou a meranou predpoveďou, stačí už iba pre jeden model. 
+
+```{r, fig.width=8, fig.height=5, fig.align='center'}
+dat$fore$mult$naive <- naive(dat$train$observed, h = 36)
+dat$fore$mult$lin <- forecast(
+  tslm(observed ~ trend, data = dat$train, lambda = 1),
+  newdata = dat$valid
+)
+dat$fore$mult$`SARIMA(1,1,0)(1,1,0)` <-
+  forecast(fit$Int$`SARIMA(1,1,0)(1,1,0)_12`, h = 36)
+dat$fore$mult$`SARIMA(0,1,1)(0,1,1)` <-
+  forecast(fit$Int$`SARIMA(0,1,1)(0,1,1)_12`, h = 36)
+dat$fore$mult$`SARIMA(1,1,1)(1,1,1)` <-
+  forecast(fit$Int$`SARIMA(1,1,1)(1,1,1)_12`, h = 36)
+
+autoplot(dat$fore$mult$`SARIMA(1,1,0)(1,1,0)`,
+  series = "SARIMA(1,1,0)(1,1,0)"
+) +
+  autolayer(
+    dat$fore$mult$lin,
+    PI = FALSE, series = "Lienárny trend"
+  ) +
+  autolayer(dat$fore$mult$naive, PI = FALSE, series = "Naive") +
+  autolayer(dat$full$observed, series = "Merané")
+```
+
+## Vyhodnotenie modelov
+
+Zostavme tabulku s chybami
+
+```{r, fig.width=8, fig.height=5, fig.align='center'}
+list(
+  multi = dat$fore$mult |>
+    lapply(forecast::accuracy, x = dat$valid$observed) |>
+    lapply(round, digits = 2) |>
+    lapply(tibble::as_tibble, rownames = "Set") |>
+    dplyr::bind_rows(.id = "model")
+) |>
+  lapply(as.data.frame)
+```
+
+Ako sa dalo čakať, naivná predpoveď ani obyčajný lineárny trend ani zďaleka tak dobre nemodelovali situáciu ani pri trénovacej vzorke ani pri testovacej vzorke, ako nám poskytli modely ARIMA. Pozerajúc sa na RMSE, najpresnejšie popisuje dáta model SARIMA(1,1,1)(1,1,1), ale veľmi podobne presne aj SARIMA(1,1,0)(1,1,0). Pri predpovedaní však najlepšie skóre získal SARIMA(0,1,1)(0,1,1), iba 25.15. Toto nie presne zodpovedá tomu, čo sme videli na grafoch, kde sa javil ako najlepšie predpovedajúci SARIME(1,1,0)(1,1,0). Nie vždy je okometrické meranie naozaj aj to správne.
+
+Ešte si vykreslime všetky modely spolu s trénovacou aj validačnou vzorkou a ich predpoveďami.
+
+```{r, fig.width=8, fig.height=5, fig.align='center'}
+base <- autoplot(dat$full$observed) +
+  autolayer(fitted(dat$fore$mult$lin), series = "Lienárny trend") +
+  autolayer(
+    dat$fore$mult$lin,
+    PI = FALSE, series = "Lienárny trend predpoveď"
+  ) +
+  autolayer(dat$fore$mult$naive, PI = FALSE, series = "Naivná predpoveď")
+base +
+  autolayer(fitted(fit$Int$`SARIMA(1,1,0)(1,1,0)_12`),
+    series = "SARIMA(1,1,0)(1,1,0)"
+  ) +
+  autolayer(dat$fore$mult$`SARIMA(1,1,0)(1,1,0)`,
+    series = "SARIMA(1,1,0)(1,1,0)", PI = FALSE
+  )
+base +
+  autolayer(fitted(fit$Int$`SARIMA(0,1,1)(0,1,1)_12`),
+    series = "SARIMA(0,1,1)(0,1,1)"
+  ) +
+  autolayer(dat$fore$mult$`SARIMA(0,1,1)(0,1,1)`,
+    series = "SARIMA(0,1,1)(0,1,1)", PI = FALSE
+  )
+base +
+  autolayer(fitted(fit$Int$`SARIMA(1,1,1)(1,1,1)_12`),
+    series = "SARIMA(1,1,1)(1,1,1)"
+  ) +
+  autolayer(dat$fore$mult$`SARIMA(1,1,1)(1,1,1)`,
+    series = "SARIMA(1,1,1)(1,1,1)", PI = FALSE
+  )
+```
+
+Ako najpresnejší sa tentokrát javý práve SARIMA(0,1,1)(0,1,1)_12, preto by som ďalej pokračoval s ním.
+

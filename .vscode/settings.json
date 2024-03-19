@@ -9,5 +9,8 @@
     "reziduí",
     "stacionaritu",
     "trénovaciu"
-  ]
+  ],
+  "[rmd]": {
+    "editor.defaultFormatter": "REditorSupport.r"
+  }
 }
