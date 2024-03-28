@@ -2,7 +2,9 @@
 title: "Analýza Časových Radov"
 author: "Timur Kramár"
 date: "`r Sys.Date()`"
-output: html_document
+output: 
+  html_document: 
+    toc: true
 ---
 
 ```{r setup, include=FALSE}
@@ -1109,3 +1111,175 @@ base +
 
 Ako najpresnejší sa tentokrát javý práve SARIMA(0,1,1)(0,1,1)_12, preto by som ďalej pokračoval s ním.
 
+# 5 Exponenciálne vyrovnávanie
+
+## Identifikácia vhodných modelov
+
+<!-- Identifikujte vhodných kandidátov z triedy modelov ETS a odhadnite ich parametre. -->
+
+Nakoľka pracujeme s dátami, o ktorých vieme, že majú v sebe exponenciálny trend a sezónnu zložku, ktorej amplitúda rastie spolu s hodnotami, najrozumnejšie sa javý použiť model ETS(M, M, M). Pre porovnanie sa ale pozirme aj na iné modely, teda spolu budeme analyzovať 4 modely:
+
+ * ETS(M, M, M) - model s exponenciálnym trendom a exponenciálnou sezónnou zložkou
+ * ETS(A,A,A) po Box-Coxovej transformácií. 
+ * ETS(M, A, M) - trendová zložka bude aditívna namiesto multiplikatívnej
+ * auto - nešpecifikujeme výber modelu, necháme to na forecast::ets()
+
+```{r, fig.width=8, fig.height=5, fig.align='center'}
+fit$ETS$MMM <- airpass |>
+  window(end = c(1957, 12)) |>
+  forecast::ets(model = "MMM")
+fit$ETS$bcAAA <- airpass |>
+  window(end = c(1957, 12)) |>
+  forecast::ets(model = "AAA", lambda = "auto")
+fit$ETS$MAM <- airpass |>
+  window(end = c(1957, 12)) |>
+  forecast::ets(model = "MAM")
+fit$ETS$auto <- airpass |>
+  window(end = c(1957, 12)) |>
+  forecast::ets()
+
+fit$ETS |>
+  lapply(forecast::accuracy) |>
+  lapply(round, 2) |>
+  lapply(as.data.frame) |>
+  dplyr::bind_rows(.id = "model")
+```
+
+Z chýb vyzerá, že najlepšie opisuje trénovaciu vzorku práve model ETS(M, A, M), aj automatický výber ho očividne uznal za najvhodnejší.
+
+```{r, fig.width=8, fig.height=5, fig.align='center'}
+airpass |>
+  window(end = c(1957, 12)) |>
+  forecast::ets(model = "ZZZ", ic = "bic")
+```
+
+## Porovnanie predpovedí modelov a zobrazenie
+
+Pozrime sa teraz na predpovede týchto modelov
+
+### Viackrokové predpovede
+
+```{r, fig.width=8, fig.height=5, fig.align='center'}
+dat$fore$ETS$multi <- fit$ETS |>
+  lapply(function(obj) {
+    forecast::forecast(
+      object = obj,
+      h = nrow(dat$valid)
+    )
+  })
+
+autoplot(window(airpass, end = c(1957, 12))) +
+  autolayer(window(airpass, start = c(1957, 12)),
+    color = "black", series = "Validačná vzorka", lty = 2
+  ) +
+  labs(y = "") +
+  coord_cartesian(xlim = c(1950, 1961)) +
+  autolayer(dat$fore$ETS$multi$MMM,
+    series = "ETS(M,M,M)", PI = FALSE
+  ) +
+  autolayer(dat$fore$ETS$multi$bcAAA,
+    series = "ETS(A,A,A), BoxCox", PI = FALSE
+  ) +
+  autolayer(dat$fore$ETS$multi$MAM,
+    series = "ETS(M,A,M)", PI = FALSE
+  ) +
+  autolayer(dat$fore$ETS$multi$auto,
+    series = "auto -> ETS(M,A,M)", PI = FALSE
+  ) +
+  guides(color = guide_legend(title = "model")) +
+  theme(
+    legend.position = "inside", legend.position.inside = c(0.01, 0.99),
+    legend.justification.inside = c(0, 1)
+  ) +
+  labs(title = "Multi-step forecasts")
+```
+
+Vidíme, že čo sa viackrokového predpovedania týka, najpresnejší je nami zadaný model "MMM", dokonca trochu presnejší ako automaticky zvolený "MAM". Model "AAA" po Box-Coxovej transformácií má podobnú chybu ako naše modelovania v predošlých kapitolách, keďže dáta vo validačnej vzorke nenasledovali exponenciálny trend.
+
+### Jednokrokové predpovede
+
+```{r, fig.width=8, fig.height=5, fig.align='center'}
+dat$fore$ETS$single <- fit$ETS |>
+  lapply(function(obj) {
+    forecast::ets(
+      y = airpass,
+      model = obj, # keep all parameters estimated on training set
+      use.initial.values = TRUE # including initial values
+    )
+  }) |>
+  lapply(function(obj) {
+    mean <- obj |>
+      fitted() |>
+      window(start = c(1957, 12))
+    se <- sqrt(obj$sigma2)
+    data.frame(
+      mean = mean,
+      lower = mean - 2 * sqrt(se),
+      upper = mean + 2 * sqrt(se)
+    )
+  })
+
+dat$fore$ETS$single |>
+  lapply(within, expr = {
+    time <- time(mean)
+  }) |>
+  dplyr::bind_rows(.id = "model") |>
+  ggplot() +
+  aes(x = time) +
+  geom_line(aes(y = mean, color = model)) +
+  geom_line(aes(y = observed, x = time), data = data.frame(
+    time = time(window(airpass, start = c(1957, 12))),
+    observed = as.numeric(window(airpass, start = c(1957, 12)))
+  )) +
+  facet_wrap(vars(model), ncol = 2)
+```
+
+Tu sa iba ťažko určuje, ktorý model je najlepší, keďže všetky sú si veľmi podobné. Pozrime sa preto na chyby.
+
+```{r, fig.width=8, fig.height=5, fig.align='center'}
+dat$fore$ETS$single |>
+  lapply(function(y) {
+    forecast::accuracy(y$mean, window(airpass, start = c(1958, 1)))
+  }) |>
+  lapply(round, digits = 2) |>
+  lapply(tibble::as_tibble, rownames = "Set") |>
+  dplyr::bind_rows(.id = "model") |>
+  as.data.frame()
+```
+
+Prekvapivo navyššiu hodnotu RMSE dosahuje bcAAA, ale všetky modely vykazujú pomerne vysokú schopnosť jednokrokovej predpovede.
+
+## Zobrazenie najlepšieho modelu: ETS(M, A, M)
+
+Pozrime sa teda na najlepší model, teda ETS(M, A, M). Vykreslime si ho v porovnaní s trénovacou aj validačnou vzorkou.
+
+```{r, fig.width=8, fig.height=5, fig.align='center'}
+autoplot(window(airpass, end = c(1957, 12))) +
+  labs(y = "") +
+  autolayer(dat$fore$ETS$multi$auto,
+    series = "ETS(M,A,M) predpoveď", PI = TRUE
+  ) +
+  autolayer(fit$ETS$auto |> fitted() |> window(end = c(1957, 12)),
+    series = "ETS(M,A,M) opis"
+  ) +
+  autolayer(window(airpass, start = c(1957, 12)),
+    color = "black", series = "Validačná vzorka", lty = 2
+  ) +
+  guides(color = guide_legend(title = "model")) +
+  theme(
+    legend.position = "inside", legend.position.inside = c(0.01, 0.99),
+    legend.justification.inside = c(0, 1)
+  ) +
+  labs(title = "Best model against the data")
+```
+
+## Zhruntie stavov
+
+Zobrazme si stavy najlepšieho modelu, teda ETS(M, A, M).
+
+```{r, fig.width=8, fig.height=5, fig.align='center'}
+fit$ETS$MAM$states[, c("l", "b", "s1")] |>
+  forecast::autoplot(facets = TRUE)
+```
+
+Na stavoch vidíme aditívny trend, jasnú sezónnu zložku s periódov 12 mesiacov a pomerne náhodne vyzerajúce chyby. 
